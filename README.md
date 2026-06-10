@@ -204,6 +204,7 @@ Any emoji works — it will be displayed as the room tile icon.
 
 ```bash
 echo "display_rotate=1" | sudo tee -a /boot/config.txt
+sudo reboot
 ```
 
 ### Set default audio device (USB speakerphone)
