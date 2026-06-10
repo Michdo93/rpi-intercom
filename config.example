@@ -1,0 +1,22 @@
+# SIP server
+SIP_SERVER   = "192.168.1.50"
+SIP_PORT     = 5060
+
+# this device
+MY_USERNAME  = "room1"
+MY_PASSWORD  = "1pass"
+MY_ROOM_NAME = "Conference"
+
+# all rooms (name → extension)
+ROOMS = {
+    "Conference": "101",
+    "Kitchen":    "102",
+    "Bathroom":   "103",
+    "IoT":        "104",
+    "Multimedia": "105",
+}
+
+# settings
+DEFAULT_VOLUME     = 80
+DEFAULT_BRIGHTNESS = 80
+FULLSCREEN         = True
