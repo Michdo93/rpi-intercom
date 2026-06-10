@@ -3,14 +3,11 @@ bin/
 include/
 lib/
 lib64/
+lib64
 pyvenv.cfg
 __pycache__/
 *.pyc
 *.pyo
  
 # Configuration (includes passwords)
-config.py
- 
-# Pip
-requirements.txt
- 
+config.py 
