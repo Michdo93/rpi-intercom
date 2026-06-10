@@ -13,6 +13,19 @@ A room-to-room intercom system for Raspberry Pi with touchscreen display, powere
 
 ---
 
+## Pre-Installation
+
+If you use the Waveshare 3.5":
+
+```
+sudo apt update && sudo apt upgrade -y
+git clone https://github.com/waveshare/LCD-show
+cd LCD-show
+sudo ./LCD35-show
+```
+
+---
+
 ## Installation
 
 ### 1. Install dependencies
@@ -190,11 +203,7 @@ Any emoji works — it will be displayed as the room tile icon.
 ### Portrait mode (touchscreen)
 
 ```bash
-sudo nano /boot/config.txt
-```
-
-```ini
-display_rotate=1
+echo "display_rotate=1" | sudo tee -a /boot/config.txt
 ```
 
 ### Set default audio device (USB speakerphone)
