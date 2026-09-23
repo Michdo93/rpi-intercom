@@ -2,6 +2,11 @@
 
 A room-to-room intercom system for Raspberry Pi with touchscreen display, powered by SIP and Asterisk. Rooms can call each other, conference calls are supported.
 
+
+![Intercom 1](https://github.com/Michdo93/test2/blob/main/intercom.png?raw=true)
+![Intercom 2](https://github.com/Michdo93/test2/blob/main/intercom2.png?raw=true)
+![Intercom 3](https://github.com/Michdo93/test2/blob/main/intercom3.png?raw=true)
+
 ---
 
 ## Requirements
