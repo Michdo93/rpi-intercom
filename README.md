@@ -2,7 +2,6 @@
 
 A room-to-room intercom system for Raspberry Pi with touchscreen display, powered by SIP and Asterisk. Rooms can call each other, conference calls are supported.
 
-
 ![Intercom 1](https://github.com/Michdo93/test2/blob/main/intercom.png?raw=true)
 ![Intercom 2](https://github.com/Michdo93/test2/blob/main/intercom2.png?raw=true)
 ![Intercom 3](https://github.com/Michdo93/test2/blob/main/intercom3.png?raw=true)
@@ -11,22 +10,101 @@ A room-to-room intercom system for Raspberry Pi with touchscreen display, powere
 
 ## Requirements
 
-- Raspberry Pi 3B / 3B+ with touchscreen (e.g. Waveshare 3.5")
+- Raspberry Pi 3B / 3B+
+- Waveshare 3.5" Touchscreen Display
 - Raspberry Pi OS Desktop (32-bit)
 - Asterisk server running on your local network
-- USB speakerphone (e.g. EMEET e104)
+- USB speakerphone: Plantronics Calisto 3200 (or compatible USB Audio Class device)
 
 ---
 
-## Pre-Installation
+## Pre-Installation: Waveshare 3.5" Display
 
-If you use the Waveshare 3.5":
+Install display drivers before setting up the application:
 
-```
+```bash
 sudo apt update && sudo apt upgrade -y
 git clone https://github.com/waveshare/LCD-show
 cd LCD-show
 sudo ./LCD35-show
+```
+
+The Pi will reboot automatically. After reboot, enable portrait mode:
+
+```bash
+echo "display_rotate=1" | sudo tee -a /boot/config.txt
+sudo reboot
+```
+
+---
+
+## Audio Setup: Plantronics Calisto 3200
+
+The Plantronics Calisto 3200 is a USB speakerphone with built-in echo cancellation and noise reduction. It is recognized as a standard USB Audio Class device on Linux — no driver installation required.
+
+### 1. Plug in the device and verify recognition
+
+```bash
+lsusb
+aplay -l
+arecord -l
+```
+
+The device should appear as a new audio card, typically `card 1`.
+
+### 2. Set as default audio device
+
+```bash
+sudo nano /etc/asound.conf
+```
+
+```
+defaults.pcm.card 1
+defaults.ctl.card 1
+```
+
+### 3. Test microphone and speaker
+
+```bash
+# Record a 5-second test clip
+arecord -d 5 -D hw:1,0 -f cd /tmp/test.wav
+
+# Play it back
+aplay -D hw:1,0 /tmp/test.wav
+```
+
+### 4. Set volume
+
+```bash
+amixer -c 1 sset Master 80%
+```
+
+To make the volume setting persistent across reboots:
+
+```bash
+sudo alsactl store
+```
+
+### Note on PulseAudio / PipeWire
+
+If PulseAudio or PipeWire is active (default on Raspberry Pi OS Desktop), the card index may change. In that case, identify the device by name instead:
+
+```bash
+pactl list short sinks
+pactl list short sources
+```
+
+Set by name in `/etc/asound.conf` if needed:
+
+```
+defaults.pcm.!default {
+    type hw
+    card Calisto
+}
+defaults.ctl.!default {
+    type hw
+    card Calisto
+}
 ```
 
 ---
@@ -74,11 +152,11 @@ MY_PASSWORD  = "room1pass"      # SIP password
 MY_ROOM_NAME = "Conference"     # Display name for this room
 
 ROOMS = {
-    "Conference": "101",
-    "Kitchen":    "102",
-    "Bathroom":   "103",
-    "IoT":        "104",
-    "Multimedia": "105",
+    "Conference": "501",
+    "Kitchen":    "502",
+    "Bathroom":   "503",
+    "IoT":        "504",
+    "Multimedia": "505",
 }
 ```
 
@@ -125,10 +203,12 @@ sudo systemctl start intercom
 
 ## Asterisk Configuration
 
+This application connects to an Asterisk server. See the companion repository [asterisk-smarthome](https://github.com/Michdo93/asterisk-smarthome) for the full Asterisk setup.
+
 Add one endpoint per room to `/etc/asterisk/pjsip.conf`:
 
 ```ini
-[raum1]
+[room1]
 type=endpoint
 context=smarthome
 disallow=all
@@ -143,7 +223,7 @@ media_encryption_optimistic=yes
 rtp_symmetric=yes
 rewrite_contact=yes
 
-[rom1]
+[room1]
 type=auth
 auth_type=userpass
 username=room1
@@ -155,14 +235,23 @@ max_contacts=1
 remove_existing=yes
 ```
 
-Add extensions to `/etc/asterisk/extensions.conf`:
+Add intercom extensions to `/etc/asterisk/extensions.conf`:
 
 ```ini
 [smarthome]
-exten => 101,1,Dial(PJSIP/room1,30)
+exten => 501,1,Dial(PJSIP/room1,30)
  same => n,Hangup()
 
-exten => 102,1,Dial(PJSIP/room2,30)
+exten => 502,1,Dial(PJSIP/room2,30)
+ same => n,Hangup()
+
+exten => 503,1,Dial(PJSIP/room3,30)
+ same => n,Hangup()
+
+exten => 504,1,Dial(PJSIP/room4,30)
+ same => n,Hangup()
+
+exten => 505,1,Dial(PJSIP/room5,30)
  same => n,Hangup()
 ```
 
@@ -185,9 +274,9 @@ Edit the `ROOMS` dictionary in `config.py`:
 
 ```python
 ROOMS = {
-    "Living Room": "101",
-    "Bedroom":     "102",
-    "Office":      "103",
+    "Living Room": "501",
+    "Bedroom":     "502",
+    "Office":      "503",
 }
 ```
 
@@ -203,33 +292,29 @@ ROOM_ICONS = {
 }
 ```
 
-Any emoji works — it will be displayed as the room tile icon.
+### Service buttons (Calendar, Weather, News)
 
-### Portrait mode (touchscreen)
+Edit `SERVICE_BUTTONS` in `ui.py`:
 
-```bash
-echo "display_rotate=1" | sudo tee -a /boot/config.txt
-sudo reboot
+```python
+SERVICE_BUTTONS = [
+    ("📅", "Calendar",   "601"),
+    ("🌤", "Weather",    "602"),
+    ("📰", "News",       "603"),
+]
 ```
 
-### Set default audio device (USB speakerphone)
+### Test buttons (STT/TTS)
 
-Check the card number after plugging in:
+Edit `TEST_BUTTONS` in `ui.py`:
 
-```bash
-aplay -l
-arecord -l
-```
-
-Set as default:
-
-```bash
-sudo nano /etc/asound.conf
-```
-
-```
-defaults.pcm.card 1
-defaults.ctl.card 1
+```python
+TEST_BUTTONS = [
+    ("🎤", "STT Test",          "100"),
+    ("🔊", "TTS Test",          "200"),
+    ("🧠", "Whisper (single)",  "300"),
+    ("🔁", "Whisper (loop)",    "400"),
+]
 ```
 
 ---
