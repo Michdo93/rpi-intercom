@@ -1,5 +1,5 @@
 # SIP server
-SIP_SERVER   = "192.168.1.50"
+SIP_SERVER   = "192.168.2.55"
 SIP_PORT     = 5060
 
 # this device
@@ -7,13 +7,29 @@ MY_USERNAME  = "room1"
 MY_PASSWORD  = "1pass"
 MY_ROOM_NAME = "Conference"
 
-# all rooms (name → extension)
+# all rooms (name → extension) — used for intercom grid and conference
+
 ROOMS = {
     "Conference": "101",
     "Kitchen":    "102",
     "Bathroom":   "103",
     "IoT":        "104",
     "Multimedia": "105",
+}
+
+# service shortcuts (name → extension) — shown as list buttons below rooms
+SERVICE_EXTENSIONS = {
+    "Calendar": "601",
+    "Weather":  "602",
+    "News":     "603",
+}
+
+# test shortcuts (name → extension) — shown as list buttons below services
+TEST_EXTENSIONS = {
+    "STT Test":            "100",
+    "TTS Test":            "200",
+    "Whisper (once)":      "300",
+    "Whisper (multiple)":  "400",
 }
 
 # settings
