@@ -12,7 +12,7 @@ BG3        = "#1a1a38"
 BG4        = "#1e1e3a"
 ACCENT     = "#378ADD"
 ACCENT_DIM = "#185FA5"
-GREEN      = "#1D9E75"
+GREEN      = "#00FF00"
 GREEN_DIM  = "#0d2420"
 RED_BG     = "#7a1c1c"
 RED_BORDER = "#a02020"
@@ -27,23 +27,33 @@ ROOM_ICONS = {
     "Bad":        "🚿",
     "IoT":        "💡",
     "Multimedia": "🎬",
+    "Conference": "🏠",
+    "Kitchen":    "🍳",
+    "Bathroom":   "🚿",
 }
+
+# ── Service-Buttons: (Icon, Label, Durchwahl) ─────────────
+# Muss mit config.py und Asterisk extensions.conf übereinstimmen
+SERVICE_BUTTONS = [
+    ("📅", "Calendar",   "601"),
+    ("🌤", "Weather",    "602"),
+    ("📰", "News",       "603"),
+]
+
+# ── Test-Buttons: (Icon, Label, Durchwahl) ────────────────
+TEST_BUTTONS = [
+    ("🎤", "STT Test",          "100"),
+    ("🔊", "TTS Test",          "200"),
+    ("🧠", "Whisper (single)",  "300"),
+    ("🔁", "Whisper (loop)",    "400"),
+]
 
 def _icon(room):
     return ROOM_ICONS.get(room, "📞")
 
 
 class ScrollableFrame(tk.Frame):
-    """
-    Scrollbarer Container.
-    - Mausrad (Button-4/5) scrollt immer.
-    - Touch/Maus-Drag: nur wenn die Maus sich >DRAG_THRESHOLD px bewegt hat.
-      Andernfalls wird der Klick an das Widget weitergereicht.
-    - Button-1 Click-Handler der Kind-Widgets bleiben erhalten durch
-      add="+" beim Binden von ButtonPress/Motion und durch den Schwellenwert.
-    """
-
-    DRAG_THRESHOLD = 6  # Pixel bis Drag aktiv wird
+    DRAG_THRESHOLD = 6
 
     def __init__(self, parent, bg=BG, **kwargs):
         super().__init__(parent, bg=bg, **kwargs)
@@ -57,29 +67,22 @@ class ScrollableFrame(tk.Frame):
         self.inner.bind("<Configure>", self._on_inner_configure)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
 
-        self._drag_y    = None
-        self._dragging  = False
-
+        self._drag_y   = None
+        self._dragging = False
         self._bind_all(self.inner)
 
-    # ── Scroll-Binding ────────────────────────────────────────
     def _bind_all(self, widget):
-        """Mausrad + Drag auf alle Widgets binden, add='+' schützt Button-1."""
-        widget.bind("<Button-4>",     self._scroll_up,   add="+")
-        widget.bind("<Button-5>",     self._scroll_down, add="+")
-        widget.bind("<MouseWheel>",   self._scroll_wheel, add="+")
-        widget.bind("<ButtonPress-1>", self._drag_start,  add="+")
-        widget.bind("<B1-Motion>",    self._drag_move,   add="+")
-        widget.bind("<ButtonRelease-1>", self._drag_end, add="+")
+        widget.bind("<Button-4>",      self._scroll_up,    add="+")
+        widget.bind("<Button-5>",      self._scroll_down,  add="+")
+        widget.bind("<MouseWheel>",    self._scroll_wheel,  add="+")
+        widget.bind("<ButtonPress-1>", self._drag_start,   add="+")
+        widget.bind("<B1-Motion>",     self._drag_move,    add="+")
+        widget.bind("<ButtonRelease-1>", self._drag_end,   add="+")
         for child in widget.winfo_children():
             self._bind_all(child)
 
-    def _scroll_up(self, e):
-        self.canvas.yview_scroll(-3, "units")
-
-    def _scroll_down(self, e):
-        self.canvas.yview_scroll(3, "units")
-
+    def _scroll_up(self, e):   self.canvas.yview_scroll(-3, "units")
+    def _scroll_down(self, e): self.canvas.yview_scroll(3, "units")
     def _scroll_wheel(self, e):
         self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
@@ -134,6 +137,7 @@ class IntercomApp:
         self.speaker_muted   = False
         self.call_start_time = None
         self.call_target     = ""
+        self.call_is_service = False   # True = Service/Test, kein Konferenz-UI
         self.conf_added      = set()
 
         self.frame_idle     = ScrollableFrame(self.root)
@@ -163,6 +167,17 @@ class IntercomApp:
         tk.Label(parent, text=text.upper(), bg=BG,
                  fg=TEXT_DIM, font=("", 9)).pack(pady=pady)
 
+    def _find_scrollable(self, widget):
+        w = widget
+        while w is not None:
+            if isinstance(w, ScrollableFrame):
+                return w
+            try:
+                w = w.master
+            except Exception:
+                break
+        return None
+
     def _card_btn(self, parent, icon, name, ext, cmd):
         outer = tk.Frame(parent, bg=BG4, padx=1, pady=1)
         inner = tk.Frame(outer, bg=BG2)
@@ -178,7 +193,6 @@ class IntercomApp:
         lbl_e.pack(pady=(3, 18))
 
         def click(e=None):
-            # Nur klicken wenn kein Drag aktiv war
             sf = self._find_scrollable(outer)
             if sf and sf._dragging:
                 return
@@ -190,6 +204,51 @@ class IntercomApp:
             for w in (inner, lbl_i, lbl_n, lbl_e): w.config(bg=BG2)
 
         for w in (outer, inner, lbl_i, lbl_n, lbl_e):
+            w.bind("<Button-1>", click)
+            w.bind("<Enter>", enter)
+            w.bind("<Leave>", leave)
+
+        return outer
+
+    def _list_btn(self, parent, icon, name, ext, cmd, fg_accent=None):
+        """Einzeiliger Button für Service- und Test-Zeilen."""
+        fg_a = fg_accent or ACCENT
+        outer = tk.Frame(parent, bg=BG4, pady=1, padx=1)
+        outer.pack(fill="x", pady=3)
+        inner = tk.Frame(outer, bg=BG2, cursor="hand2")
+        inner.pack(fill="both")
+
+        lbl_icon = tk.Label(inner, text=icon, bg=BG2, fg=TEXT,
+                            font=("", 16), width=3)
+        lbl_icon.pack(side="left", padx=(10, 0), pady=10)
+
+        lbl_name = tk.Label(inner, text=name, bg=BG2, fg=TEXT,
+                            font=("", 12, "bold"), anchor="w")
+        lbl_name.pack(side="left", padx=8, pady=10, fill="x", expand=True)
+
+        lbl_ext = tk.Label(inner, text=ext, bg=BG2, fg=fg_a,
+                           font=("", 10), anchor="e")
+        lbl_ext.pack(side="right", padx=14, pady=10)
+
+        all_w = (outer, inner, lbl_icon, lbl_name, lbl_ext)
+
+        def click(e=None):
+            sf = self._find_scrollable(outer)
+            if sf and sf._dragging:
+                return
+            cmd()
+
+        def enter(e=None):
+            for w in all_w:
+                try: w.config(bg=BG3)
+                except Exception: pass
+
+        def leave(e=None):
+            for w in all_w:
+                try: w.config(bg=BG2)
+                except Exception: pass
+
+        for w in all_w:
             w.bind("<Button-1>", click)
             w.bind("<Enter>", enter)
             w.bind("<Leave>", leave)
@@ -216,18 +275,6 @@ class IntercomApp:
 
         return outer, inner, lbl_i, lbl_l
 
-    def _find_scrollable(self, widget):
-        """Findet den ScrollableFrame-Vorfahren eines Widgets."""
-        w = widget
-        while w is not None:
-            if isinstance(w, ScrollableFrame):
-                return w
-            try:
-                w = w.master
-            except Exception:
-                break
-        return None
-
     # ── IDLE ─────────────────────────────────────────────────
     def _build_idle(self):
         p = self._p(self.frame_idle)
@@ -246,8 +293,9 @@ class IntercomApp:
         tk.Label(p, text=MY_ROOM_NAME, bg=BG, fg=TEXT_DIM,
                  font=("", 12)).pack()
 
+        # ── 1. Räume ─────────────────────────────────────────
         self._divider(p, pady=16)
-        self._section_label(p, "Raum auswählen")
+        self._section_label(p, "Rooms")
 
         grid = tk.Frame(p, bg=BG)
         grid.pack(fill="x", padx=14, pady=(0, 4))
@@ -258,17 +306,44 @@ class IntercomApp:
         rooms = [(r, e) for r, e in ROOMS.items() if r != MY_ROOM_NAME]
         for i, (room, ext) in enumerate(rooms):
             row, col = divmod(i, 2)
-            btn = self._card_btn(grid, _icon(room), room, ext,
-                                 lambda r=room, e=ext: self._start_call(r, e))
+            btn = self._card_btn(
+                grid, _icon(room), room, ext,
+                lambda r=room, e=ext: self._start_call(r, e))
             btn.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
             grid.rowconfigure(row, weight=1, uniform="row")
             self.room_btns[room] = btn
 
+        # ── 2. Services ───────────────────────────────────────
+        self._divider(p, pady=16)
+        self._section_label(p, "Services")
+
+        svc_frame = tk.Frame(p, bg=BG)
+        svc_frame.pack(fill="x", padx=14)
+
+        for icon, name, ext in SERVICE_BUTTONS:
+            self._list_btn(
+                svc_frame, icon, name, ext,
+                lambda n=name, e=ext: self._start_service(n, e))
+
+        # ── 3. Tests ──────────────────────────────────────────
+        self._divider(p, pady=16)
+        self._section_label(p, "Tests")
+
+        test_frame = tk.Frame(p, bg=BG)
+        test_frame.pack(fill="x", padx=14)
+
+        for icon, name, ext in TEST_BUTTONS:
+            self._list_btn(
+                test_frame, icon, name, ext,
+                lambda n=name, e=ext: self._start_service(n, e),
+                fg_accent="#666688")
+
+        # ── 4. Einstellungen ──────────────────────────────────
         self._divider(p, pady=16)
 
         settings_frame = tk.Frame(p, bg=BG, cursor="hand2")
         settings_frame.pack(fill="x")
-        settings_lbl = tk.Label(settings_frame, text="⚙   Einstellungen",
+        settings_lbl = tk.Label(settings_frame, text="⚙   Settings",
                                 bg=BG, fg=TEXT_DIM, font=("", 12), pady=14)
         settings_lbl.pack(fill="x")
 
@@ -296,7 +371,7 @@ class IntercomApp:
 
         hdr = tk.Frame(p, bg=BG)
         hdr.pack(fill="x", padx=18, pady=(18, 0))
-        tk.Label(hdr, text="● Aktiver Anruf",
+        tk.Label(hdr, text="● Active Call",
                  bg=BG, fg=GREEN, font=("", 11, "bold")).pack(side="left")
         self.lbl_clock_call = tk.Label(hdr, text="",
                                        bg=BG, fg=TEXT_DIM, font=("", 11))
@@ -314,7 +389,7 @@ class IntercomApp:
                                       font=("", 24, "bold"))
         self.lbl_call_name.pack(pady=(12, 4))
 
-        self.lbl_call_status = tk.Label(p, text="Verbinde…",
+        self.lbl_call_status = tk.Label(p, text="Connecting…",
                                         bg=BG, fg=TEXT_MID, font=("", 11))
         self.lbl_call_status.pack()
 
@@ -326,24 +401,30 @@ class IntercomApp:
         btn_row.pack(fill="x", padx=14, pady=(0, 4))
 
         mic_outer, mic_inner, mic_i, mic_l = self._action_btn(
-            btn_row, "🎙", "Mikro", BG2, TEXT_MID, BG4, self._toggle_mic)
+            btn_row, "🎙", "Mute", BG2, TEXT_MID, BG4, self._toggle_mic)
         mic_outer.pack(side="left", fill="both", expand=True, padx=(0, 4))
         self._mic_widgets = (mic_outer, mic_inner, mic_i, mic_l)
 
         end_outer, _, _, _ = self._action_btn(
-            btn_row, "📵", "Auflegen", RED_BG, RED_TEXT, RED_BORDER,
+            btn_row, "📵", "Hang up", RED_BG, RED_TEXT, RED_BORDER,
             self._hangup)
         end_outer.pack(side="left", fill="both", expand=True, padx=4)
 
         spk_outer, spk_inner, spk_i, spk_l = self._action_btn(
-            btn_row, "🔊", "Ton", BG2, TEXT_MID, BG4, self._toggle_speaker)
+            btn_row, "🔊", "Speaker", BG2, TEXT_MID, BG4, self._toggle_speaker)
         spk_outer.pack(side="left", fill="both", expand=True, padx=(4, 0))
         self._spk_widgets = (spk_outer, spk_inner, spk_i, spk_l)
 
-        self._divider(p, pady=16)
-        self._section_label(p, "Konferenz", pady=(0, 10))
+        # Konferenz-Bereich — wird bei Services ausgeblendet
+        self.conf_section = tk.Frame(p, bg=BG)
+        self.conf_section.pack(fill="x")
 
-        conf_frame = tk.Frame(p, bg=BG)
+        tk.Frame(self.conf_section, bg=BG4, height=1).pack(
+            fill="x", pady=16)
+        tk.Label(self.conf_section, text="CONFERENCE",
+                 bg=BG, fg=TEXT_DIM, font=("", 9)).pack(pady=(0, 10))
+
+        conf_frame = tk.Frame(self.conf_section, bg=BG)
         conf_frame.pack(fill="x", padx=14)
 
         self.conf_btns   = {}
@@ -392,7 +473,7 @@ class IntercomApp:
 
         hdr = tk.Frame(p, bg=BG)
         hdr.pack(fill="x", padx=18, pady=(18, 0))
-        back = tk.Label(hdr, text="←  Zurück",
+        back = tk.Label(hdr, text="←  Back",
                         bg=BG, fg=ACCENT, font=("", 12), cursor="hand2")
         back.pack(side="left")
 
@@ -410,7 +491,7 @@ class IntercomApp:
                                       bg=BG, fg=TEXT_DIM, font=("", 11))
         self.lbl_clock_set.pack(side="right")
 
-        tk.Label(p, text="Einstellungen", bg=BG, fg=TEXT,
+        tk.Label(p, text="Settings", bg=BG, fg=TEXT,
                  font=("", 24, "bold")).pack(pady=(24, 24))
 
         def slider_block(label, default, from_, to, cmd, store):
@@ -436,24 +517,25 @@ class IntercomApp:
 
         self._lbl_vol    = []
         self._lbl_bright = []
-        self.vol_var    = slider_block("Lautstärke", DEFAULT_VOLUME,
+        self.vol_var    = slider_block("Volume", DEFAULT_VOLUME,
                                        0, 100, self._set_volume,
                                        self._lbl_vol)
-        self.bright_var = slider_block("Helligkeit", DEFAULT_BRIGHTNESS,
+        self.bright_var = slider_block("Brightness", DEFAULT_BRIGHTNESS,
                                        10, 100, self._set_brightness,
                                        self._lbl_bright)
 
         self._divider(p, pady=12)
-        self._section_label(p, "SIP-Verbindung", pady=(12, 12))
+        tk.Label(p, text="SIP CONNECTION", bg=BG,
+                 fg=TEXT_DIM, font=("", 9)).pack(pady=(12, 12))
 
         info = tk.Frame(p, bg=BG2,
                         highlightbackground=BG4, highlightthickness=1)
         info.pack(fill="x", padx=20)
 
         for i, (label, val) in enumerate([
-            ("Benutzer", MY_USERNAME),
-            ("Raum",     MY_ROOM_NAME),
-            ("Server",   f"{SIP_SERVER}:{SIP_PORT}"),
+            ("User",   MY_USERNAME),
+            ("Room",   MY_ROOM_NAME),
+            ("Server", f"{SIP_SERVER}:{SIP_PORT}"),
         ]):
             if i > 0:
                 tk.Frame(info, bg=BG4, height=1).pack(fill="x", padx=14)
@@ -468,19 +550,21 @@ class IntercomApp:
 
     # ── Call-Logik ───────────────────────────────────────────
     def _start_call(self, room, ext):
+        """Intercom-Anruf zu einem anderen Raum."""
         self.call_target     = room
+        self.call_is_service = False
         self.call_start_time = None
         self.conf_added      = set()
         self.mic_muted       = False
         self.speaker_muted   = False
 
         self.lbl_call_name.config(text=room)
-        self.lbl_call_status.config(text="Verbinde…", fg=TEXT_MID)
+        self.lbl_call_status.config(text="Connecting…", fg=TEXT_MID)
         self.lbl_timer.config(text="00:00")
 
         for widgets, icon, label in (
-            (self._mic_widgets, "🎙", "Mikro"),
-            (self._spk_widgets, "🔊", "Ton"),
+            (self._mic_widgets, "🎙", "Mute"),
+            (self._spk_widgets, "🔊", "Speaker"),
         ):
             _, inner, lbl_i, lbl_l = widgets
             for w in (inner, lbl_i, lbl_l): w.config(bg=BG2)
@@ -493,12 +577,48 @@ class IntercomApp:
         for r, lbl in self.conf_btns.items():
             inn = self.conf_inners[r]
             if r == room:
-                lbl.config(text=f"✓  {_icon(r)}  {r}  (aktiv)",
+                lbl.config(text=f"✓  {_icon(r)}  {r}  (active)",
                            fg=GREEN, bg=GREEN_DIM)
                 inn.config(bg=GREEN_DIM)
             else:
                 lbl.config(text=f"＋  {_icon(r)}  {r}", fg=ACCENT, bg=BG2)
                 inn.config(bg=BG2)
+
+        # Konferenz-Bereich einblenden
+        self.conf_section.pack(fill="x")
+
+        self._show(self.frame_call)
+        self.call_active = True
+        self.sip.call(ext)
+
+    def _start_service(self, name, ext):
+        """Service- oder Test-Anruf — kein Konferenz-UI."""
+        self.call_target     = name
+        self.call_is_service = True
+        self.call_start_time = None
+        self.mic_muted       = False
+        self.speaker_muted   = False
+
+        self.lbl_call_name.config(text=name)
+        self.lbl_call_status.config(text="Connecting…", fg=TEXT_MID)
+        self.lbl_timer.config(text="00:00")
+
+        for widgets, icon, label in (
+            (self._mic_widgets, "🎙", "Mute"),
+            (self._spk_widgets, "🔊", "Speaker"),
+        ):
+            _, inner, lbl_i, lbl_l = widgets
+            for w in (inner, lbl_i, lbl_l): w.config(bg=BG2)
+            lbl_i.config(fg=TEXT_MID, text=icon)
+            lbl_l.config(fg=TEXT_MID, text=label)
+
+        # Avatar: Icon des Services
+        icon_map = {b[1]: b[0] for b in SERVICE_BUTTONS + TEST_BUTTONS}
+        avatar_icon = icon_map.get(name, "📞")
+        self.cv_avatar.itemconfig(self.avatar_txt, text=avatar_icon)
+
+        # Konferenz-Bereich ausblenden — bei Services nicht relevant
+        self.conf_section.pack_forget()
 
         self._show(self.frame_call)
         self.call_active = True
@@ -507,7 +627,7 @@ class IntercomApp:
     def on_call_state(self, state_text, remote_uri):
         def _update():
             if "CONFIRMED" in state_text:
-                self.lbl_call_status.config(text="Verbunden", fg=GREEN)
+                self.lbl_call_status.config(text="Connected", fg=GREEN)
                 self.call_start_time = time.time()
             elif "DISCONNECTED" in state_text:
                 self.call_active     = False
@@ -520,26 +640,28 @@ class IntercomApp:
         if "sip:" in remote_uri:
             user = remote_uri.split("sip:")[1].split("@")[0]
         room = next(
-            (r for r, e in ROOMS.items() if e == user), user or "Unbekannt")
+            (r for r, e in ROOMS.items() if e == user), user or "Unknown")
 
         def _show():
             self.call_active     = True
             self.call_start_time = time.time()
             self.call_target     = room
+            self.call_is_service = False
             self.lbl_call_name.config(text=room)
-            self.lbl_call_status.config(text="Eingehend", fg=GREEN)
+            self.lbl_call_status.config(text="Incoming", fg=GREEN)
             initials = "".join(w[0].upper() for w in room.split()[:2])
             self.cv_avatar.itemconfig(self.avatar_txt, text=initials)
             for r, lbl in self.conf_btns.items():
                 inn = self.conf_inners[r]
                 if r == room:
-                    lbl.config(text=f"✓  {_icon(r)}  {r}  (aktiv)",
+                    lbl.config(text=f"✓  {_icon(r)}  {r}  (active)",
                                fg=GREEN, bg=GREEN_DIM)
                     inn.config(bg=GREEN_DIM)
                 else:
                     lbl.config(text=f"＋  {_icon(r)}  {r}",
                                fg=ACCENT, bg=BG2)
                     inn.config(bg=BG2)
+            self.conf_section.pack(fill="x")
             self._show(self.frame_call)
         self.root.after(0, _show)
 
@@ -556,11 +678,11 @@ class IntercomApp:
         if self.mic_muted:
             for w in (inner, lbl_i, lbl_l): w.config(bg="#3a1010")
             lbl_i.config(fg="#ff6666", text="🔇")
-            lbl_l.config(fg="#ff6666", text="Stumm")
+            lbl_l.config(fg="#ff6666", text="Muted")
         else:
             for w in (inner, lbl_i, lbl_l): w.config(bg=BG2)
             lbl_i.config(fg=TEXT_MID, text="🎙")
-            lbl_l.config(fg=TEXT_MID, text="Mikro")
+            lbl_l.config(fg=TEXT_MID, text="Mute")
 
     def _toggle_speaker(self):
         self.speaker_muted = not self.speaker_muted
@@ -569,11 +691,11 @@ class IntercomApp:
         if self.speaker_muted:
             for w in (inner, lbl_i, lbl_l): w.config(bg="#3a1010")
             lbl_i.config(fg="#ff6666", text="🔈")
-            lbl_l.config(fg="#ff6666", text="Stumm")
+            lbl_l.config(fg="#ff6666", text="Muted")
         else:
             for w in (inner, lbl_i, lbl_l): w.config(bg=BG2)
             lbl_i.config(fg=TEXT_MID, text="🔊")
-            lbl_l.config(fg=TEXT_MID, text="Ton")
+            lbl_l.config(fg=TEXT_MID, text="Speaker")
 
     def _add_conference(self, room, ext):
         if room in self.conf_added:
